@@ -25,44 +25,344 @@ impl Cpu{
         }
     }
 
+    pub fn load(&self, addr: u64, size: u64) -> Result<u64, ()>{
+        self.bus.load(addr, size)
+    }
+
+    pub fn store(&mut self, addr: u64, size: u64, value: u64) -> Result<(), ()>{
+        self.bus.store(addr, size, value)
+    }
+
     pub fn execute(&mut self, instruction: u64) -> Result<(), ()>{
         let opcode = instruction & 0x7f;
         let rd = ((instruction >> 7) & 0x1f) as usize;
         let funct3 = ((instruction >> 12) & 0x07) as usize;
+        let funct7 = (instruction >> 25) & 0x7f;
         let rs1 = ((instruction >> 15) & 0x1f) as usize;
         let rs2 = ((instruction >> 20) & 0x1f) as usize;
 
-        self.registers[0] = 0;
-        // Keep adding opcodes. Maybe add load and store fns for cpu. 
         match opcode{
             0x03 =>{
                 let imm = ((instruction as i32 as i64) >> 20) as u64;
                 let addr = self.registers[rs1].wrapping_add(imm);
                 match funct3{
+                    //lb
                     0x00 => {
-                        let data = self.bus.load(addr, 8)? as i8 as i64 as u64;
+                        let data = self.load(addr, 8)? as i8 as i64 as u64;
                         self.registers[rd] = data;
                     }
-                    _ => {}
+                    //lh
+                    0x01 => {
+                        let data  = self.load(addr, 16)? as i16 as i64 as u64;
+                        self.registers[rd] = data;
+                    }
+                    //lw
+                    0x02 => {
+                        let data = self.load(addr, 32)? as i32 as i64 as u64;
+                        self.registers[rd] = data;
+                    }
+                    //ld
+                    0x03 => {
+                        let data = self.load(addr, 64)?;
+                        self.registers[rd] = data;
+                    }
+                    //lbu
+                    0x04 => {
+                        let data = self.load(addr, 8)?;
+                        self.registers[rd] = data;
+                    }
+                    //lhu
+                    0x05 => {
+                        let data = self.load(addr, 16)?;
+                        self.registers[rd] = data;
+                    }
+                    //lwu
+                    0x06 => {
+                        let data = self.load(addr, 32)?;
+                        self.registers[rd] = data;
+                    }
+                    _ => {
+                        eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
+                        return Err(())
+                    } 
                 }
             }
             0x13 => {
                 let imm = ((instruction as i32 as i64) >> 20) as u64;
-                self.registers[rd] = self.registers[rs1].wrapping_add(imm);
+                let shiftamt = (imm & 0x3f) as u32;
+                match funct3 {
+                    //addi
+                    0x0 => {
+                        self.registers[rd] = self.registers[rs1].wrapping_add(imm);
+                    }
+                    // slli
+                    0x1 => {
+                        self.registers[rd] = self.registers[rs1] << shiftamt;
+                    }
+                    // slti
+                    0x2 => {
+                        self.registers[rd] = if (self.registers[rs1] as i64) < (imm as i64) { 1 } else { 0 };
+                    }
+                    // sltiu
+                    0x3 => {
+                        self.registers[rd] = if self.registers[rs1] < imm { 1 } else { 0 };
+                    }
+                    // xori
+                    0x4 => {
+                        self.registers[rd] = self.registers[rs1] ^ imm;
+                    }
+                    0x5 => {
+                        match funct7 >> 1 {
+                            // srli
+                            0x00 => self.registers[rd] = self.registers[rs1].wrapping_shr(shiftamt),
+                            // srai
+                            0x10 => {
+                                self.registers[rd] = (self.registers[rs1] as i64).wrapping_shr(shiftamt) as u64
+                            }
+                            _ => {}
+                        }
+                    }
+                    // ori
+                    0x6 => self.registers[rd] = self.registers[rs1] | imm,
+                    // andi
+                    0x7 => self.registers[rd] = self.registers[rs1] & imm,
+                    _ => {
+                        eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
+                        return Err(())
+                    }
+                }
             }
+            //auipc
+            0x17 => {
+                let imm = (instruction & 0xfffff000) as i32 as i64 as u64;
+                self.registers[rd] = self.pc.wrapping_add(imm).wrapping_sub(4);
+            }
+            0x1b => {
+                let imm = ((instruction as i32 as i64) >> 20) as u64;
+                let shiftamt = (imm & 0x1f) as u32;
+                match funct3 {
+                    //addiw
+                    0x00 => {
+                        self.registers[rd] = self.registers[rs1].wrapping_add(imm) as i32 as i64 as u64;
+                    }
+                    //slliw
+                    0x01 => {
+                        self.registers[rd] = self.registers[rs1].wrapping_shl(shiftamt) as i32 as i64 as u64;
+                    }
+                    0x05 => {
+                        match funct7 {
+                            //srliw
+                            0x00 => {
+                                self.registers[rd] = (self.registers[rs1] as u32).wrapping_shr(shiftamt) as i32 as i64 as u64;
+                            }
+                            //sraiw
+                            0x20 => {
+                                self.registers[rd] = (self.registers[rs1] as i32).wrapping_shr(shiftamt) as i64 as u64;
+                            }
+                            _ => {
+                                eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
+                                return Err(())
+                            }
+                        }
+                    }
+                    _ => {
+                        eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
+                        return Err(())
+                    }
+                }
+            }
+            //sb, sh, sw, sd
+            0x23 => {
+                let imm = (((instruction & 0xfe000000) as i32 as i64) >> 20) as u64 | ((instruction >> 7) & 0x1f);
+                let addr = self.registers[rs1].wrapping_add(imm);
+                match funct3{
+                    0x00 => {
+                        self.store(addr, 8, self.registers[rs2])?;
+                    }
+                    0x01 => {
+                        self.store(addr, 16, self.registers[rs2])?;
+                    }
+                    0x02 => {
+                        self.store(addr, 32, self.registers[rs2])?;
+                    }
+                    0x03 => {
+                        self.store(addr, 64, self.registers[rs2])?;
+                    }
+                    _ => {
+                        eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
+                        return Err(())
+                    }
+                }
+            }
+            //add
             0x33 => {
-                self.registers[rd] = self.registers[rs1].wrapping_add(self.registers[rs2]);
+                let shiftamt = ((self.registers[rs2] & 0x3f) as u64) as u32;
+                match (funct3, funct7) {
+                    //add
+                    (0x0, 0x00) => {
+                        self.registers[rd] = self.registers[rs1].wrapping_add(self.registers[rs2]);
+                    }
+                    //mul
+                    (0x0, 0x01) => {
+                        self.registers[rd] = self.registers[rs1].wrapping_mul(self.registers[rs2]);
+                    }
+                    //sub
+                    (0x0, 0x20) => {
+                        self.registers[rd] = self.registers[rs1].wrapping_sub(self.registers[rs2]);
+                    }
+                    //xor
+                    (0x4, 0x00) => {
+                        self.registers[rd] = self.registers[rs1] ^ (self.registers[rs2]);
+                    }
+                    //or
+                    (0x6, 0x00) => {
+                        self.registers[rd] = self.registers[rs1] | (self.registers[rs2]);
+                    }
+                    //and
+                    (0x7, 0x00) => {
+                        self.registers[rd] = self.registers[rs1] & (self.registers[rs2]);
+                    }
+                    //sll
+                    (0x1, 0x00) => {
+                        self.registers[rd] = self.registers[rs1].wrapping_shl(shiftamt);
+                    }
+                    //slr
+                    (0x5, 0x00) => {
+                        self.registers[rd] = self.registers[rs1].wrapping_shr(shiftamt);
+                    }
+                    //sra
+                    (0x5, 0x20) => {
+                        self.registers[rd] = (self.registers[rs1] as i64).wrapping_shr(shiftamt) as u64;
+                    }
+                    //slt
+                    (0x2, 0x00) => {
+                        self.registers[rd] = if (self.registers[rs1] as i64) < (self.registers[rs2] as i64) { 1 } else { 0 };
+                    }
+                    //sltu
+                    (0x3, 0x00) => {
+                        self.registers[rd] = if self.registers[rs1] < self.registers[rs2] { 1 } else { 0 };
+                    }
+                    _ => {
+                        eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
+                        return Err(())
+                    }
+                }
+            }
+            //lui
+            0x37 => {
+                self.registers[rd] = (instruction & 0xfffff000) as i32 as i64 as u64;
+            }
+            0x3b => {
+                let shiftamt = (self.registers[rs2] & 0x1f) as u32;
+                match (funct3, funct7) {
+                    //addw             
+                    (0x0, 0x00) => {
+                        self.registers[rd] =
+                            self.registers[rs1].wrapping_add(self.registers[rs2]) as i32 as i64 as u64;
+                    }
+                    //subw
+                    (0x0, 0x20) => {
+                        self.registers[rd] =((self.registers[rs1].wrapping_sub(self.registers[rs2])) as i32) as i64 as u64;
+                    }
+                    //sllw
+                    (0x1, 0x00) => {
+                        self.registers[rd] = ((self.registers[rs1] as u32).wrapping_shl(shiftamt) as i32) as i64 as u64;
+                    }
+                    //srlw
+                    (0x5, 0x00) => {
+                        self.registers[rd] = ((self.registers[rs1] as u32).wrapping_shr(shiftamt) as i32) as i64 as u64;
+                    }
+                    //sraw
+                    (0x5, 0x20) => {
+                        self.registers[rd] = (self.registers[rs1] as i32).wrapping_shr(shiftamt) as i64 as u64;
+                    }
+                    _ => {
+                        println!(
+                            "not implemented yet: opcode {:#x} funct3 {:#x} funct7 {:#x}",
+                            opcode, funct3, funct7
+                        );
+                        return Err(());
+                    }
+                }
+            }
+            //branchs
+            0x63 => {
+                let imm = (((instruction & 0x80000000) as i32 as i64 >> 19) as u64)
+                    | ((instruction & 0x80) << 4) 
+                    | ((instruction >> 20) & 0x7e0) 
+                    | ((instruction >> 7) & 0x1e);
+                match funct3 {
+                    0x00 => {
+                        if self.registers[rs1] == self.registers[rs2] {
+                            self.pc = self.pc.wrapping_add(imm).wrapping_sub(4);
+                        }
+                    }
+                    0x01 => {
+                        if self.registers[rs1] != self.registers[rs2] {
+                            self.pc = self.pc.wrapping_add(imm).wrapping_sub(4);
+                        }
+                    }
+                    0x04 => {
+                        if (self.registers[rs1] as i64) < (self.registers[rs2] as i64) {
+                            self.pc = self.pc.wrapping_add(imm).wrapping_sub(4);
+                        }
+                    }
+                    0x05 => {
+                        if (self.registers[rs1] as i64) >= (self.registers[rs2] as i64) {
+                            self.pc = self.pc.wrapping_add(imm).wrapping_sub(4);
+                        }
+                    }
+                    0x06 => {
+                        if self.registers[rs1] < self.registers[rs2] {
+                            self.pc = self.pc.wrapping_add(imm).wrapping_sub(4);
+                        }
+                    }
+                    0x07 => {
+                        if self.registers[rs1] >= self.registers[rs2] {
+                            self.pc = self.pc.wrapping_add(imm).wrapping_sub(4);
+                        }
+                    }
+                    _ => {
+                        eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
+                        return Err(())
+                    }
+                }
+            }
+            //jalr
+            0x67 => {
+                match funct3 {
+                    0x00 => {
+                        let temp = self.pc;
+                        let imm = (((instruction >> 20) as i32) as i64) as u64;
+                        self.pc = (self.registers[rs1].wrapping_add(imm)) & !1;
+                        self.registers[rd] = temp;
+                    }
+                    _ => {
+                        eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
+                        return Err(())
+                    }
+                }
+            }
+            //jal 
+            0x6f => {
+                let imm = (((instruction & 0x80000000) as i32 as i64 >> 11) as u64) 
+                    | (instruction & 0xff000) 
+                    | ((instruction >> 9) & 0x800) 
+                    | ((instruction >> 20) & 0x7fe);
+                self.registers[rd] = self.pc;
+                self.pc = self.pc.wrapping_add(imm).wrapping_sub(4);
             }
             _ =>{
                 dbg!("Not done");
                 return Err(())
             }
         }
+        self.registers[0] = 0;
         Ok(())
     }
 
     pub fn dump_registers(&self) {
-        let mut output = String::from("");
+        let mut output = String ::from("");
         let abi = [
             "zero", " ra ", " sp ", " gp ", " tp ", " t0 ", " t1 ", " t2 ", " s0 ", " s1 ", " a0 ",
             " a1 ", " a2 ", " a3 ", " a4 ", " a5 ", " a6 ", " a7 ", " s2 ", " s3 ", " s4 ", " s5 ",

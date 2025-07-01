@@ -1,10 +1,36 @@
 use crate::bus::*;
 use crate::dram::{DRAM_SIZE, DRAM_BASE};
 
+//Machine-level CSRs 
+pub const MSTATUS: usize = 0x300;
+pub const MIE: usize = 0x304;
+pub const MTVEC: usize = 0x305;
+pub const MHARTID: usize = 0xf14;
+pub const MEDELEG: usize = 0x302;
+pub const MIDELEG: usize = 0x303;
+pub const MCOUNTEREN: usize = 0x306;
+pub const MSCRATCH: usize = 0x340;
+pub const MEPC: usize = 0x341;
+pub const MCAUSE: usize = 0x342;
+pub const MTVAL: usize = 0x343;
+pub const MIP: usize = 0x344;
+
+//Supervisor-level CSRs 
+pub const SSTATUS: usize = 0x100;
+pub const SIE: usize = 0x104;
+pub const STVEC: usize = 0x105;
+pub const SSCRATCH: usize = 0x140;
+pub const SEPC: usize = 0x141;
+pub const SCAUSE: usize = 0x142;
+pub const STVAL: usize = 0x143;
+pub const SIP: usize = 0x144;
+pub const SATP: usize = 0x180;
+
 pub struct Cpu{
     pub registers: [u64; 32],
     pub pc: u64,
     pub bus: Bus,
+    pub csregs: [u64; 4096],
 }
 
 impl Cpu{
@@ -15,6 +41,7 @@ impl Cpu{
             registers: regs,
             pc: DRAM_BASE,
             bus: Bus::new(binary),
+            csregs: [0; 4096],
         }
     }   
 
@@ -31,6 +58,28 @@ impl Cpu{
 
     pub fn store(&mut self, addr: u64, size: u64, value: u64) -> Result<(), ()>{
         self.bus.store(addr, size, value)
+    }
+
+    pub fn load_csr(&self, addr: usize) -> u64{
+        match addr{
+            SIE => self.csregs[MIE] & self.csregs[MIDELEG],
+            SSTATUS => self.csregs[MSTATUS] & 0x8000000200026162,
+            _ => self.csregs[addr],
+        }
+    }
+
+    pub fn store_csr(&mut self, addr: usize, value: u64){
+        match addr{
+            SIE => {
+                let mask = self.csregs[MIDELEG];
+                self.csregs[MIE] = (self.csregs[MIE] & !mask) | (value & mask);
+            }
+            SSTATUS => {
+                let mask = 0x8000000200026162;
+                self.csregs[MSTATUS] = (self.csregs[MSTATUS] & !mask) | (value & mask);
+            }
+            _ => self.csregs[addr] = value,
+        }
     }
 
     pub fn execute(&mut self, instruction: u64) -> Result<(), ()>{
@@ -352,6 +401,56 @@ impl Cpu{
                 self.registers[rd] = self.pc;
                 self.pc = self.pc.wrapping_add(imm).wrapping_sub(4);
             }
+            //zicsr
+            0x73 => {
+                let csr = ((instruction >> 20) & 0xfff) as usize;
+                match funct3{
+                    0x1 => {
+                        let val = self.load_csr(csr);
+                        self.store_csr(csr, self.registers[rs1]);
+                        self.registers[rd] = val;
+                    }
+                    0x2 => {
+                        let val = self.load_csr(csr);
+                        if rs1 != 0 { 
+                            self.store_csr(csr, val | self.registers[rs1]);
+                        }
+                        self.registers[rd] = val;
+                    }
+                    0x3 => {
+                        let val = self.load_csr(csr);
+                        if rs1 != 0{
+                            self.store_csr(csr, val & (!self.registers[rs1]));
+                        }
+                        self.registers[rd] = val;
+                    }
+                    0x5 => {
+                        let imm = rs1 as u64;
+                        self.registers[rd] = self.load_csr(csr);
+                        self.store_csr(csr, imm);
+                    }
+                    0x6 => {
+                        let imm = rs1 as u64;
+                        let t = self.load_csr(csr);
+                        if imm != 0 {
+                            self.store_csr(csr, t | imm);
+                        }
+                        self.registers[rd] = t;
+                    }
+                    0x7 => {
+                        let imm = rs1 as u64;
+                        let t = self.load_csr(csr);
+                        if imm != 0 {
+                            self.store_csr(csr, t & (!imm));
+                        }
+                        self.registers[rd] = t;
+                    }
+                    _ => {
+                        eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
+                        return Err(())
+                    }
+                }
+            }
             _ =>{
                 dbg!("Not done");
                 return Err(())
@@ -362,7 +461,7 @@ impl Cpu{
     }
 
     pub fn dump_registers(&self) {
-        let mut output = String ::from("");
+        let mut output = String::from("");
         let abi = [
             "zero", " ra ", " sp ", " gp ", " tp ", " t0 ", " t1 ", " t2 ", " s0 ", " s1 ", " a0 ",
             " a1 ", " a2 ", " a3 ", " a4 ", " a5 ", " a6 ", " a7 ", " s2 ", " s3 ", " s4 ", " s5 ",

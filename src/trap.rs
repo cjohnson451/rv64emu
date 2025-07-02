@@ -46,7 +46,7 @@ pub trait Trap {
             cpu.pc = cpu.load_csr(STVEC) & !1;
             cpu.store_csr(STVAL, 0);
             let mut sstatus = cpu.load_csr(SSTATUS);
-            if (sstatus >> 1) & 1 == 1 { sstatus |= (1 << 5); }
+            if (sstatus >> 1) & 1 == 1 { sstatus |= 1 << 5; }
             else { sstatus &= !(1 << 5); }
             sstatus &= !(1 << 1);
             sstatus &= !(1 << 8); 

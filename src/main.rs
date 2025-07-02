@@ -6,6 +6,8 @@ mod cpu;
 mod dram; 
 mod bus;
 mod trap;
+mod plic;
+mod clint;
 use crate::cpu::*;
 use crate::trap::*;
 

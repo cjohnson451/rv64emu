@@ -283,7 +283,6 @@ impl Cpu{
                     }
                 }
             }
-            //add
             0x33 => {
                 let shiftamt = ((self.registers[rs2] & 0x3f) as u64) as u32;
                 match (funct3, funct7) {
@@ -318,6 +317,18 @@ impl Cpu{
                     //slr
                     (0x5, 0x00) => {
                         self.registers[rd] = self.registers[rs1].wrapping_shr(shiftamt);
+                    }
+                    (0x5, 0x01) => {
+                        self.registers[rd] = match self.registers[rs2] {
+                            0 => {
+                                0xffffffff_ffffffff
+                            }
+                            _ => {
+                                let dividend = self.registers[rs1];
+                                let divisor = self.registers[rs2];
+                                dividend.wrapping_div(divisor)
+                            }
+                        };  
                     }
                     //sra
                     (0x5, 0x20) => {
@@ -364,6 +375,17 @@ impl Cpu{
                     //sraw
                     (0x5, 0x20) => {
                         self.registers[rd] = (self.registers[rs1] as i32).wrapping_shr(shiftamt) as i64 as u64;
+                    }
+                    // remuw
+                    (0x7, 0x01) => {
+                        self.registers[rd] = match self.registers[rs2] {
+                            0 => self.registers[rs1],
+                            _ => {
+                                let dividend = self.registers[rs1] as u32;
+                                let divisor = self.registers[rs2] as u32;
+                                dividend.wrapping_rem(divisor) as u64
+                            }
+                        };
                     }
                     _ => {
                         println!(
@@ -445,6 +467,54 @@ impl Cpu{
             0x73 => {
                 let csr = ((instruction >> 20) & 0xfff) as usize;
                 match funct3{
+                    0x0 => {
+                        match (rs2, funct7) {
+                            (0x2, 0x8) => {
+                                self.pc = self.load_csr(SEPC);
+                                let mode = self.load_csr(SSTATUS) >> 8 & 1;
+                                match mode {
+                                    1 => self.curr_mode = Mode::Supervisor,
+                                    _ => self.curr_mode = Mode::User,
+                                };
+                                let mut new_sstatus = self.load_csr(SSTATUS);
+                                let spie = (self.load_csr(SSTATUS) >> 5) & 1; 
+                                if spie == 1 {
+                                    new_sstatus |= (1 << 1); 
+                                } else {
+                                    new_sstatus &= !(1 << 1); 
+                                }
+                                new_sstatus |= (1 << 5);
+                                new_sstatus &= !(1 << 8); 
+                                self.store_csr(SSTATUS, new_sstatus);
+                            }
+                            (0x2, 0x18) => {
+                                self.pc = self.load_csr(MEPC);
+                                let mode = (self.load_csr(MSTATUS) >> 11) & 0b11;
+                                match mode {
+                                    2 => self.curr_mode = Mode::Machine,
+                                    1 => self.curr_mode = Mode::Supervisor,
+                                    _ => self.curr_mode = Mode::User,
+                                }
+                                let mut new_mstatus = self.load_csr(MSTATUS);
+                                let spie = (self.load_csr(MSTATUS) >> 7) & 1; 
+                                if spie == 1 {
+                                    new_mstatus |= (1 << 3); 
+                                } else {
+                                    new_mstatus &= !(1 << 3); 
+                                }
+                                new_mstatus |= (1 << 7);
+                                new_mstatus &= !(0b11 << 11);
+                                self.store_csr(MSTATUS, new_mstatus);
+                            }
+                            _ => {
+                                println!(
+                                    "not implemented yet: opcode {:#x} funct3 {:#x} funct7 {:#x}",
+                                    opcode, funct3, funct7
+                                );
+                                return Err(());
+                            }
+                        }
+                    }
                     0x1 => {
                         let val = self.load_csr(csr);
                         self.store_csr(csr, self.registers[rs1]);

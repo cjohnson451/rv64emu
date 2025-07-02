@@ -1,6 +1,7 @@
 use crate::dram::*;
-use crate::dram::DRAM_BASE;
 use crate::trap::*;
+use crate::plic::*;
+use crate::clint::*;
 
 pub const CLINT_BASE: u64 = 0x200_0000;
 pub const CLINT_SIZE: u64 = 0x10000;
@@ -14,14 +15,26 @@ pub trait Device {
 
 pub struct Bus{
     dram: Dram,
+    plic: Plic,
+    clint: Clint,
 }
 
 impl Bus{
     pub fn new(binary: Vec<u8>) -> Self{
-        Self { dram: Dram::new(binary)}
+        Self { 
+            dram: Dram::new(binary),
+            plic: Plic::new(),
+            clint: Clint::new(),
+        }
     }
 
     pub fn load(&self, addr: u64, size: u64) -> Result<u64, Exception> {
+        if CLINT_BASE <= addr && addr < CLINT_BASE + CLINT_SIZE {
+            return self.clint.load(addr, size)
+        }
+        if PLIC_BASE <= addr && addr < PLIC_BASE + PLIC_SIZE {
+            return self.plic.load(addr, size)
+        }
         if addr >= DRAM_BASE{
             return self.dram.load(addr, size)
         }
@@ -29,6 +42,12 @@ impl Bus{
     }
     
     pub fn store(&mut self, addr: u64, size: u64, value: u64) -> Result<(), Exception> {
+        if CLINT_BASE <= addr && addr < CLINT_BASE + CLINT_SIZE {
+            return self.clint.store(addr, size, value)
+        }
+        if PLIC_BASE <= addr && addr < PLIC_BASE + PLIC_SIZE {
+            return self.plic.store(addr, size, value)
+        }
         if addr >= DRAM_BASE{
             return self.dram.store(addr, size, value)
         }

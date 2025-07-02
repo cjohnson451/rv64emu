@@ -74,7 +74,6 @@ impl Cpu{
     pub fn load_csr(&self, addr: usize) -> u64{
         match addr{
             SIE => self.csregs[MIE] & self.csregs[MIDELEG],
-            SSTATUS => self.csregs[MSTATUS] & 0x8000000200026162,
             _ => self.csregs[addr],
         }
     }
@@ -84,10 +83,6 @@ impl Cpu{
             SIE => {
                 let mask = self.csregs[MIDELEG];
                 self.csregs[MIE] = (self.csregs[MIE] & !mask) | (value & mask);
-            }
-            SSTATUS => {
-                let mask = 0x8000000200026162;
-                self.csregs[MSTATUS] = (self.csregs[MSTATUS] & !mask) | (value & mask);
             }
             _ => self.csregs[addr] = value,
         }
@@ -535,16 +530,12 @@ impl Cpu{
                     }
                     0x2 => {
                         let val = self.load_csr(csr);
-                        if rs1 != 0 { 
-                            self.store_csr(csr, val | self.registers[rs1]);
-                        }
+                        self.store_csr(csr, val | self.registers[rs1]);
                         self.registers[rd] = val;
                     }
                     0x3 => {
                         let val = self.load_csr(csr);
-                        if rs1 != 0{
-                            self.store_csr(csr, val & (!self.registers[rs1]));
-                        }
+                        self.store_csr(csr, val & (!self.registers[rs1]));
                         self.registers[rd] = val;
                     }
                     0x5 => {
@@ -555,17 +546,13 @@ impl Cpu{
                     0x6 => {
                         let imm = rs1 as u64;
                         let t = self.load_csr(csr);
-                        if imm != 0 {
-                            self.store_csr(csr, t | imm);
-                        }
+                        self.store_csr(csr, t | imm);
                         self.registers[rd] = t;
                     }
                     0x7 => {
                         let imm = rs1 as u64;
                         let t = self.load_csr(csr);
-                        if imm != 0 {
-                            self.store_csr(csr, t & (!imm));
-                        }
+                        self.store_csr(csr, t & (!imm));
                         self.registers[rd] = t;
                     }
                     _ => {
@@ -576,6 +563,7 @@ impl Cpu{
             }
             _ =>{
                 dbg!("Not done");
+                eprintln!("Have not implemented opcode: {:#x}", opcode);
                 return Err(Exception::IllegalInstruction)
             }
         }
@@ -613,4 +601,26 @@ impl Cpu{
         }
         println!("{}", output);
     }
+
+    pub fn dump_csrs(&self) {
+        let output = format!(
+            "{}\n{}",
+            format!(
+                "mstatus={:>#18x} mtvec={:>#18x} mepc={:>#18x} mcause={:>#18x}",
+                self.load_csr(MSTATUS),
+                self.load_csr(MTVEC),
+                self.load_csr(MEPC),
+                self.load_csr(MCAUSE),
+            ),
+            format!(
+                "sstatus={:>#18x} stvec={:>#18x} sepc={:>#18x} scause={:>#18x}",
+                self.load_csr(SSTATUS),
+                self.load_csr(STVEC),
+                self.load_csr(SEPC),
+                self.load_csr(SCAUSE),
+            ),
+        );
+        println!("{}", output);
+    }
 }
+

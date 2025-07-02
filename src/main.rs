@@ -14,19 +14,23 @@ use crate::trap::*;
 
 fn main() -> io::Result<()>{
     let args: Vec<String> = env::args().collect();
-    if args.len() != 2{
-        eprintln!("Usage: rvemu <filename>");
+    if args.len() < 2 || args.len() > 3{
+        eprintln!("Usage: rvemu <filename> [--no-trap]");
         std::process::exit(1);
     }
     let filename = &args[1];
+    let no_trap = args.len() == 3 && args[2] == "--no-trap";
     let mut file = File::open(filename)?;
     let mut code: Vec<u8> = Vec::new();
     file.read_to_end(&mut code)?;
     let mut cpu = Cpu::new(code);
     loop{
             let instruction = match cpu.fetch(){
-                Ok(instuction) => instuction,
+                Ok(instruction) => instruction,
                 Err(exception) => {
+                    if no_trap {
+                        break;
+                    }
                     exception.handle_trap(&mut cpu);
                     if exception.is_fatal() {
                         break;
@@ -40,6 +44,9 @@ fn main() -> io::Result<()>{
             match cpu.execute(instruction){
                 Ok(_) => {},
                 Err(exception) => {
+                    if no_trap {
+                        break;
+                    }
                     exception.handle_trap(&mut cpu);
                     if exception.is_fatal() {
                         break;
@@ -52,6 +59,8 @@ fn main() -> io::Result<()>{
             }
     }
     cpu.dump_registers();
+    println!("-----------------------------------------------------------------------------------------------------------");
+    cpu.dump_csrs();
     Ok(())
 }
 

@@ -26,11 +26,18 @@ pub const STVAL: usize = 0x143;
 pub const SIP: usize = 0x144;
 pub const SATP: usize = 0x180;
 
+pub enum Mode{
+    User = 0x0,
+    Supervisor = 0x1,
+    Machine = 0x3
+}
+
 pub struct Cpu{
     pub registers: [u64; 32],
     pub pc: u64,
     pub bus: Bus,
     pub csregs: [u64; 4096],
+    pub curr_mode: Mode,
 }
 
 impl Cpu{
@@ -42,6 +49,7 @@ impl Cpu{
             pc: DRAM_BASE,
             bus: Bus::new(binary),
             csregs: [0; 4096],
+            curr_mode: Mode::Machine,
         }
     }   
 
@@ -239,6 +247,38 @@ impl Cpu{
                     }
                     _ => {
                         eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
+                        return Err(())
+                    }
+                }
+            }
+            //atomics
+            0x2f => {
+                let funct5 = (funct7 & 0b1111100) >> 2;
+                let _aq = (funct7 & 0b0000010) >> 1;
+                let _rl = funct7 & 0b0000001; 
+                match (funct3, funct5) {
+                    (0x2, 0x00) => {
+                        let val = self.load(self.registers[rs1], 32)?;
+                        self.registers[rd] = val;
+                        self.store(self.registers[rs1], 32, val.wrapping_add(self.registers[rs2]))?;
+                    }
+                    (0x3, 0x00) => {
+                        let val: u64 = self.load(self.registers[rs1], 64)?;
+                        self.registers[rd] = val;
+                        self.store(self.registers[rs1], 64, val.wrapping_add(self.registers[rs2]))?;
+                    }
+                    (0x2, 0x01) => {
+                        let val = self.load(self.registers[rs1], 32)?;
+                        self.registers[rd] = val;
+                        self.store(self.registers[rs1], 32, self.registers[rs2])?;
+                    }
+                    (0x3, 0x01) => {
+                        let val = self.load(self.registers[rs1], 64)?;
+                        self.registers[rd] = val;
+                        self.store(self.registers[rs1], 64, self.registers[rs2])?;
+                    }
+                    _ => {
+                        eprintln!("Have not implemented funct3: {:#x} funct5: {:#x}", funct3, funct5);
                         return Err(())
                     }
                 }

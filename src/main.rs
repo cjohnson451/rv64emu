@@ -5,7 +5,10 @@ use std::fs::File;
 mod cpu;
 mod dram; 
 mod bus;
+mod trap;
 use crate::cpu::*;
+use crate::trap::*;
+
 
 fn main() -> io::Result<()>{
     let args: Vec<String> = env::args().collect();
@@ -21,14 +24,25 @@ fn main() -> io::Result<()>{
     loop{
             let instruction = match cpu.fetch(){
                 Ok(instuction) => instuction,
-                Err(_) => break
+                Err(exception) => {
+                    exception.handle_trap(&mut cpu);
+                    if exception.is_fatal() {
+                        break;
+                    }
+                    0 
+                }
             };
             
             cpu.pc += 4;
 
             match cpu.execute(instruction){
                 Ok(_) => {},
-                Err(_) => break
+                Err(exception) => {
+                    exception.handle_trap(&mut cpu);
+                    if exception.is_fatal() {
+                        break;
+                    }
+                }
             }
 
             if cpu.pc == 0{

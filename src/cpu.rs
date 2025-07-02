@@ -1,5 +1,7 @@
+#![allow(dead_code, unused_variables)]
 use crate::bus::*;
 use crate::dram::{DRAM_SIZE, DRAM_BASE};
+use crate::trap::*;
 
 //Machine-level CSRs 
 pub const MSTATUS: usize = 0x300;
@@ -26,6 +28,7 @@ pub const STVAL: usize = 0x143;
 pub const SIP: usize = 0x144;
 pub const SATP: usize = 0x180;
 
+#[derive(Debug, PartialEq, PartialOrd, Eq, Copy, Clone)]
 pub enum Mode{
     User = 0x0,
     Supervisor = 0x1,
@@ -53,18 +56,18 @@ impl Cpu{
         }
     }   
 
-    pub fn fetch(&mut self) -> Result<u64, ()> {
+    pub fn fetch(&mut self) -> Result<u64, Exception> {
         match self.bus.load(self.pc, 32) {
             Ok(inst) => Ok(inst),
-            Err(_e) => Err(()),
+            Err(_e) => Err(Exception::InstructionAccessFault),
         }
     }
 
-    pub fn load(&self, addr: u64, size: u64) -> Result<u64, ()>{
+    pub fn load(&self, addr: u64, size: u64) -> Result<u64, Exception>{
         self.bus.load(addr, size)
     }
 
-    pub fn store(&mut self, addr: u64, size: u64, value: u64) -> Result<(), ()>{
+    pub fn store(&mut self, addr: u64, size: u64, value: u64) -> Result<(), Exception>{
         self.bus.store(addr, size, value)
     }
 
@@ -90,7 +93,7 @@ impl Cpu{
         }
     }
 
-    pub fn execute(&mut self, instruction: u64) -> Result<(), ()>{
+    pub fn execute(&mut self, instruction: u64) -> Result<(), Exception>{
         let opcode = instruction & 0x7f;
         let rd = ((instruction >> 7) & 0x1f) as usize;
         let funct3 = ((instruction >> 12) & 0x07) as usize;
@@ -140,7 +143,7 @@ impl Cpu{
                     }
                     _ => {
                         eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
-                        return Err(())
+                        return Err(Exception::IllegalInstruction)
                     } 
                 }
             }
@@ -185,7 +188,7 @@ impl Cpu{
                     0x7 => self.registers[rd] = self.registers[rs1] & imm,
                     _ => {
                         eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
-                        return Err(())
+                        return Err(Exception::IllegalInstruction)
                     }
                 }
             }
@@ -218,13 +221,13 @@ impl Cpu{
                             }
                             _ => {
                                 eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
-                                return Err(())
+                                return Err(Exception::IllegalInstruction)
                             }
                         }
                     }
                     _ => {
                         eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
-                        return Err(())
+                        return Err(Exception::IllegalInstruction)
                     }
                 }
             }
@@ -247,7 +250,7 @@ impl Cpu{
                     }
                     _ => {
                         eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
-                        return Err(())
+                        return Err(Exception::IllegalInstruction)
                     }
                 }
             }
@@ -279,7 +282,7 @@ impl Cpu{
                     }
                     _ => {
                         eprintln!("Have not implemented funct3: {:#x} funct5: {:#x}", funct3, funct5);
-                        return Err(())
+                        return Err(Exception::IllegalInstruction)
                     }
                 }
             }
@@ -344,7 +347,7 @@ impl Cpu{
                     }
                     _ => {
                         eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
-                        return Err(())
+                        return Err(Exception::IllegalInstruction)
                     }
                 }
             }
@@ -392,7 +395,7 @@ impl Cpu{
                             "not implemented yet: opcode {:#x} funct3 {:#x} funct7 {:#x}",
                             opcode, funct3, funct7
                         );
-                        return Err(());
+                        return Err(Exception::IllegalInstruction);
                     }
                 }
             }
@@ -435,7 +438,7 @@ impl Cpu{
                     }
                     _ => {
                         eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
-                        return Err(())
+                        return Err(Exception::IllegalInstruction)
                     }
                 }
             }
@@ -450,7 +453,7 @@ impl Cpu{
                     }
                     _ => {
                         eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
-                        return Err(())
+                        return Err(Exception::IllegalInstruction)
                     }
                 }
             }
@@ -469,6 +472,16 @@ impl Cpu{
                 match funct3{
                     0x0 => {
                         match (rs2, funct7) {
+                            (0x0, 0x0) => {
+                                match self.curr_mode {
+                                    Mode::Machine => return Err(Exception::EnvironmentCallFromMMode),
+                                    Mode::Supervisor => return Err(Exception::EnvironmentCallFromSMode),
+                                    Mode::User => return Err(Exception::EnvironmentCallFromUMode),
+                                }
+                            }
+                            (0x1, 0x0) => {
+                                return Err(Exception::Breakpoint)
+                            }
                             (0x2, 0x8) => {
                                 self.pc = self.load_csr(SEPC);
                                 let mode = self.load_csr(SSTATUS) >> 8 & 1;
@@ -479,11 +492,11 @@ impl Cpu{
                                 let mut new_sstatus = self.load_csr(SSTATUS);
                                 let spie = (self.load_csr(SSTATUS) >> 5) & 1; 
                                 if spie == 1 {
-                                    new_sstatus |= (1 << 1); 
+                                    new_sstatus |= 1 << 1; 
                                 } else {
                                     new_sstatus &= !(1 << 1); 
                                 }
-                                new_sstatus |= (1 << 5);
+                                new_sstatus |= 1 << 5;
                                 new_sstatus &= !(1 << 8); 
                                 self.store_csr(SSTATUS, new_sstatus);
                             }
@@ -498,11 +511,11 @@ impl Cpu{
                                 let mut new_mstatus = self.load_csr(MSTATUS);
                                 let spie = (self.load_csr(MSTATUS) >> 7) & 1; 
                                 if spie == 1 {
-                                    new_mstatus |= (1 << 3); 
+                                    new_mstatus |= 1 << 3; 
                                 } else {
                                     new_mstatus &= !(1 << 3); 
                                 }
-                                new_mstatus |= (1 << 7);
+                                new_mstatus |= 1 << 7;
                                 new_mstatus &= !(0b11 << 11);
                                 self.store_csr(MSTATUS, new_mstatus);
                             }
@@ -511,7 +524,7 @@ impl Cpu{
                                     "not implemented yet: opcode {:#x} funct3 {:#x} funct7 {:#x}",
                                     opcode, funct3, funct7
                                 );
-                                return Err(());
+                                return Err(Exception::IllegalInstruction);
                             }
                         }
                     }
@@ -557,13 +570,13 @@ impl Cpu{
                     }
                     _ => {
                         eprintln!("Have not implemented opcode: {:#x} funct3: {:#x}", opcode, funct3);
-                        return Err(())
+                        return Err(Exception::IllegalInstruction)
                     }
                 }
             }
             _ =>{
                 dbg!("Not done");
-                return Err(())
+                return Err(Exception::IllegalInstruction)
             }
         }
         self.registers[0] = 0;
